@@ -181,6 +181,14 @@ echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
 
 sudo apt update
 sudo apt install -y terraform
+
+# Manual install (fallback)
+TERRAFORM_VERSION=1.6.6
+
+wget https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+sudo mv terraform /usr/local/bin/
+terraform version
 ```
 
 #### macOS
@@ -205,6 +213,12 @@ terraform --version
 ```bash
 # Le dépôt HashiCorp est déjà configuré (étape précédente)
 sudo apt install -y vault
+
+# Manual install (fallback)
+wget https://releases.hashicorp.com/vault/1.15.6/vault_1.15.6_linux_amd64.zip
+unzip vault_1.15.6_linux_amd64.zip
+sudo mv vault /usr/local/bin/
+vault version
 ```
 
 #### macOS
