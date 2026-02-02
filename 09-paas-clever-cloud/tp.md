@@ -188,39 +188,7 @@ flask==3.0.0
 gunicorn==21.2.0
 ```
 
-### Étape 3.4 : Créer le fichier de démarrage pour Clever Cloud
-
-Clever Cloud utilise des fichiers de configuration spécifiques.
-
-```bash
-nano clevercloud/python.json
-```
-
-Créez d'abord le dossier :
-```bash
-mkdir -p clevercloud
-```
-
-```json
-{
-  "deploy": {
-    "webroot": "/",
-    "static": "/static"
-  }
-}
-```
-
-### Étape 3.5 : Créer le Procfile (optionnel mais recommandé)
-
-```bash
-nano Procfile
-```
-
-```
-web: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2
-```
-
-### Étape 3.6 : Initialiser Git
+### Étape 3.4 : Initialiser Git
 
 ```bash
 git init
@@ -266,9 +234,12 @@ Ajoutez ces variables :
 
 | Variable | Valeur |
 |----------|--------|
+| `CC_PYTHON_MODULE` | `app:app` |
+| `CC_PYTHON_VERSION` | `3.11` |
 | `APP_NAME` | `GameShelf` |
 | `ENVIRONMENT` | `production` |
-| `CC_PYTHON_VERSION` | `3.11` |
+
+> **Important** : `CC_PYTHON_MODULE` indique à Clever Cloud quel module WSGI lancer (ici l'objet `app` du fichier `app.py`).
 
 Cliquez sur **"Next"**
 
@@ -518,10 +489,7 @@ FLAG{Cl3v3r_Cl0ud_P44S_D3pl0y3d}
 ```
 gameshelf-clever/
 ├── app.py              # Application Flask
-├── requirements.txt    # Dépendances Python
-├── Procfile            # Commande de démarrage
-└── clevercloud/
-    └── python.json     # Configuration Clever Cloud
+└── requirements.txt    # Dépendances Python
 ```
 
 ---
@@ -546,7 +514,7 @@ gameshelf-clever/
 | Problème | Solution |
 |----------|----------|
 | Build échoue | Vérifiez requirements.txt |
-| App ne démarre pas | Vérifiez le Procfile et les logs |
+| App ne démarre pas | Vérifiez `CC_PYTHON_MODULE` et les logs |
 | Port incorrect | Utilisez `$PORT` (variable d'env) |
 | Push refusé | Vérifiez les droits Git et la clé SSH |
 
