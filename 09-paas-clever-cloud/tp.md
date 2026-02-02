@@ -73,14 +73,15 @@ Nous avons vu comment déployer sur des VMs (IaaS) et sur Kubernetes. C'est puis
 2. Cliquez sur **"Login"** puis **"Sign up"**
 
 3. Choisissez votre méthode :
-   - **GitHub** (recommandé) : Connexion rapide + déploiement facilité
-   - **Email** : Compte classique
+   - **Email** (recommandé) : Compte classique
+   - **GitHub** : Connexion rapide + déploiement facilité
 
-4. Si vous utilisez GitHub :
+
+5. Si vous utilisez GitHub :
    - Autorisez l'accès à votre compte
    - Clever Cloud pourra déployer depuis vos repos
 
-5. Si vous utilisez Email :
+6. Si vous utilisez Email :
    - Remplissez le formulaire
    - Validez votre email
 
