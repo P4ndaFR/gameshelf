@@ -248,7 +248,7 @@ JWKS_CACHE_DURATION = 300  # 5 minutes
 S3_ENDPOINT = os.environ.get('CELLAR_ADDON_HOST', 'cellar-c2.services.clever-cloud.com')
 S3_ACCESS_KEY = os.environ.get('CELLAR_ADDON_KEY_ID')
 S3_SECRET_KEY = os.environ.get('CELLAR_ADDON_KEY_SECRET')
-S3_BUCKET = 'gameshelf-images'
+S3_BUCKET = os.environ.get('S3_BUCKET', 'gameshelf-images')
 
 
 def get_jwks():

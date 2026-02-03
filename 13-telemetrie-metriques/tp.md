@@ -135,7 +135,7 @@ ENVIRONMENT = os.environ.get('ENVIRONMENT', 'development')
 S3_ENDPOINT = os.environ.get('CELLAR_ADDON_HOST', 'cellar-c2.services.clever-cloud.com')
 S3_ACCESS_KEY = os.environ.get('CELLAR_ADDON_KEY_ID')
 S3_SECRET_KEY = os.environ.get('CELLAR_ADDON_KEY_SECRET')
-S3_BUCKET = 'gameshelf-images'
+S3_BUCKET = os.environ.get('S3_BUCKET', 'gameshelf-images')
 
 # ============================================================
 # ATTENTION : Ce "cache" contient un bug intentionnel !

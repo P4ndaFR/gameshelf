@@ -109,8 +109,18 @@ source ~/.bashrc
 
 ### Étape 4.1 : Créer un bucket
 
+> **Important** : Les noms de buckets doivent être **uniques sur toute la plateforme Cellar**. Ajoutez un suffixe aléatoire pour éviter les conflits.
+
 ```bash
-s3cellar mb s3://gameshelf-images
+# Générer un nom unique avec un suffixe aléatoire
+s3cellar mb s3://gameshelf-images-$(openssl rand -hex 4)
+```
+
+Notez le nom du bucket créé et exportez-le dans une variable :
+
+```bash
+# Remplacez par le nom de votre bucket
+export BUCKET_NAME="gameshelf-images-a1b2c3d4"
 ```
 
 ### Étape 4.2 : Lister les buckets
@@ -135,32 +145,32 @@ echo "Image placeholder pour Codenames" > codenames.txt
 
 ```bash
 # Upload un fichier
-s3cellar cp catan.txt s3://gameshelf-images/games/catan.txt
+s3cellar cp catan.txt s3://$BUCKET_NAME/games/catan.txt
 
 # Upload plusieurs fichiers
-s3cellar cp . s3://gameshelf-images/games/ --recursive
+s3cellar cp . s3://$BUCKET_NAME/games/ --recursive
 
 # Upload avec type MIME
-s3cellar cp image.jpg s3://gameshelf-images/games/catan.jpg --content-type image/jpeg
+s3cellar cp image.jpg s3://$BUCKET_NAME/games/catan.jpg --content-type image/jpeg
 ```
 
 ### Étape 4.5 : Lister les objets
 
 ```bash
-s3cellar ls s3://gameshelf-images/
-s3cellar ls s3://gameshelf-images/games/
+s3cellar ls s3://$BUCKET_NAME/
+s3cellar ls s3://$BUCKET_NAME/games/
 ```
 
 ### Étape 4.6 : Télécharger des fichiers
 
 ```bash
-s3cellar cp s3://gameshelf-images/games/catan.txt ./downloaded-catan.txt
+s3cellar cp s3://$BUCKET_NAME/games/catan.txt ./downloaded-catan.txt
 ```
 
 ### Étape 4.7 : Supprimer des fichiers
 
 ```bash
-s3cellar rm s3://gameshelf-images/games/catan.txt
+s3cellar rm s3://$BUCKET_NAME/games/catan.txt
 ```
 
 ---
@@ -169,13 +179,10 @@ s3cellar rm s3://gameshelf-images/games/catan.txt
 
 ### Étape 5.1 : Rendre un bucket public
 
-Créez une policy pour accès public en lecture :
+Créez une policy pour accès public en lecture (remplacez `$BUCKET_NAME` par votre nom de bucket) :
 
 ```bash
-nano bucket-policy.json
-```
-
-```json
+cat > bucket-policy.json << EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -184,14 +191,17 @@ nano bucket-policy.json
       "Effect": "Allow",
       "Principal": "*",
       "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::gameshelf-images/*"
+      "Resource": "arn:aws:s3:::$BUCKET_NAME/*"
     }
   ]
 }
+EOF
 ```
 
+Appliquez la policy :
+
 ```bash
-s3cellar put-bucket-policy --bucket gameshelf-images --policy file://bucket-policy.json
+s3cellar put-bucket-policy --bucket $BUCKET_NAME --policy file://bucket-policy.json
 ```
 
 ### Étape 5.2 : Accéder aux images publiquement
@@ -201,9 +211,9 @@ L'URL publique suit ce format :
 https://<bucket>.cellar-c2.services.clever-cloud.com/<key>
 ```
 
-Exemple :
+Exemple (avec votre nom de bucket) :
 ```
-https://gameshelf-images.cellar-c2.services.clever-cloud.com/games/catan.jpg
+https://$BUCKET_NAME.cellar-c2.services.clever-cloud.com/games/catan.jpg
 ```
 
 ---
@@ -238,7 +248,7 @@ ENVIRONMENT = os.environ.get('ENVIRONMENT', 'development')
 S3_ENDPOINT = os.environ.get('CELLAR_ADDON_HOST', 'cellar-c2.services.clever-cloud.com')
 S3_ACCESS_KEY = os.environ.get('CELLAR_ADDON_KEY_ID')
 S3_SECRET_KEY = os.environ.get('CELLAR_ADDON_KEY_SECRET')
-S3_BUCKET = 'gameshelf-images'
+S3_BUCKET = os.environ.get('S3_BUCKET', 'gameshelf-images')
 
 def get_s3_client():
     """Crée un client S3 pour Cellar."""
@@ -358,7 +368,15 @@ psycopg2-binary==2.9.9
 boto3==1.34.0
 ```
 
-### Étape 6.3 : Déployer
+### Étape 6.3 : Configurer la variable d'environnement
+
+Dans Clever Cloud, ajoutez la variable suivante à votre application `gameshelf-api` :
+
+| Variable | Valeur |
+|----------|--------|
+| `S3_BUCKET` | Le nom de votre bucket (ex: `gameshelf-images-a1b2c3d4`) |
+
+### Étape 6.4 : Déployer
 
 ```bash
 git add .
