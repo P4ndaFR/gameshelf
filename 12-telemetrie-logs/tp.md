@@ -88,14 +88,17 @@ clever login
 # Lier l'application
 clever link <app_id>
 
-# Voir les logs en temps réel
-clever logs --follow
+# Voir les logs en temps réel (mode follow par défaut)
+clever logs
 
-# Voir les 100 dernières lignes
-clever logs -n 100
+# Voir les logs de la dernière heure
+clever logs --since 1h
 
-# Filtrer par type
-clever logs --filter "ERROR"
+# Voir les logs des 30 dernières minutes
+clever logs --since 30m
+
+# Voir les logs entre deux dates
+clever logs --since "2026-02-03T10:00:00" --until "2026-02-03T12:00:00"
 ```
 
 ---
@@ -451,7 +454,7 @@ git push clever main:master
 
 Dans un terminal :
 ```bash
-clever logs --follow
+clever logs
 ```
 
 ### Étape 4.2 : Générer du trafic
@@ -495,19 +498,19 @@ En analysant les logs, vous devez identifier :
 
 ### Indices dans les logs
 
-Recherchez ces patterns :
+Recherchez ces patterns (utilisez `--since` pour récupérer les logs récents) :
 ```bash
 # Filtrer les warnings
-clever logs | grep "WARNING"
+clever logs --since 1h | grep "WARNING"
 
 # Filtrer les erreurs
-clever logs | grep "ERROR"
+clever logs --since 1h | grep "ERROR"
 
 # Filtrer les recherches lentes
-clever logs | grep "SLOW"
+clever logs --since 1h | grep "SLOW"
 
 # Voir les temps de réponse
-clever logs | grep "completed"
+clever logs --since 1h | grep "completed"
 ```
 
 ### Questions d'investigation
