@@ -578,7 +578,10 @@ def get_s3_client():
                 endpoint_url=f"https://{secret.get('endpoint', '')}",
                 aws_access_key_id=secret.get('access_key'),
                 aws_secret_access_key=secret.get('secret_key'),
-                config=Config(signature_version='s3v4')
+                config=Config(
+                    signature_version='s3v4',
+                    s3={'addressing_style': 'virtual'}
+                )
             )
 
     return boto3.client(
@@ -586,7 +589,10 @@ def get_s3_client():
         endpoint_url=f"https://{os.environ.get('CELLAR_ADDON_HOST', '')}",
         aws_access_key_id=os.environ.get('CELLAR_ADDON_KEY_ID'),
         aws_secret_access_key=os.environ.get('CELLAR_ADDON_KEY_SECRET'),
-        config=Config(signature_version='s3v4')
+        config=Config(
+            signature_version='s3v4',
+            s3={'addressing_style': 'virtual'}
+        )
     )
 
 
