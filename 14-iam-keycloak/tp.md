@@ -4,7 +4,7 @@
 
 Notre API expose des données clients et des informations de location. Actuellement, n'importe qui peut accéder à ces endpoints ! Il faut sécuriser l'accès avec une authentification robuste.
 
-**Objectif de ce TP :** Déployer Keycloak sur Clever Cloud et sécuriser l'API GameShelf avec OpenID Connect.
+**Objectif de ce TP :** Configurer l'addon Keycloak sur Clever Cloud et sécuriser l'API GameShelf avec OpenID Connect.
 
 ---
 
@@ -73,90 +73,38 @@ Notre API expose des données clients et des informations de location. Actuellem
 
 ---
 
-## Partie 2 : Déploiement de Keycloak sur Clever Cloud
+## Partie 2 : Création de l'addon Keycloak
 
-### Étape 2.1 : Créer l'application Keycloak
+### Étape 2.1 : Créer l'addon Keycloak
 
 1. Connectez-vous à [console.clever-cloud.com](https://console.clever-cloud.com)
 
-2. Cliquez sur **"Create"** > **"An application"**
+2. Dans le menu principal, cliquez sur **"Create"** > **"An add-on"**
 
-3. Sélectionnez **"Docker"**
+3. Sélectionnez **"Keycloak"**
 
-4. Configurez l'application :
-   - **Name** : `gameshelf-keycloak`
-   - **Region** : Paris
-   - **Size** : S (2 GB RAM minimum pour Keycloak)
+4. Choisissez le plan :
+   - **DEV** : Pour le développement (gratuit)
 
-### Étape 2.2 : Créer le projet Keycloak
+5. **Nom** : `gameshelf-keycloak`
 
-```bash
-mkdir -p ~/gameshelf-keycloak
-cd ~/gameshelf-keycloak
-```
+6. **Lier à une application** : Sélectionnez `gameshelf-api` pour lier l'addon pendant la création
 
-### Étape 2.3 : Créer le Dockerfile
+7. Cliquez sur **"Create"**
 
-```bash
-nano Dockerfile
-```
+### Étape 2.2 : Récupérer les informations de connexion
 
-```dockerfile
-FROM quay.io/keycloak/keycloak:23.0
+Une fois l'addon créé, des variables d'environnement sont automatiquement injectées :
 
-# Configuration pour production
-ENV KC_HEALTH_ENABLED=true
-ENV KC_METRICS_ENABLED=true
+- `KEYCLOAK_ADDON_URL` : URL de l'instance Keycloak
+- `KEYCLOAK_ADDON_ADMIN` : Nom d'utilisateur admin
+- `KEYCLOAK_ADDON_PASSWORD` : Mot de passe admin
 
-# Build optimisé pour production
-RUN /opt/keycloak/bin/kc.sh build
+### Étape 2.3 : Accéder à la console Keycloak
 
-ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]
-CMD ["start", "--optimized", "--hostname-strict=false", "--proxy=edge", "--http-enabled=true"]
-```
+1. Dans l'addon Keycloak, cliquez sur **"Open Keycloak console"** ou accédez à l'URL fournie
 
-### Étape 2.4 : Créer une base PostgreSQL pour Keycloak
-
-1. Dans Clever Cloud, créez un nouvel addon PostgreSQL :
-   - **Type** : PostgreSQL
-   - **Plan** : DEV (gratuit)
-   - **Name** : `keycloak-db`
-
-2. Liez l'addon à l'application `gameshelf-keycloak`
-
-### Étape 2.5 : Configurer les variables d'environnement
-
-Dans l'application Keycloak, ajoutez ces variables :
-
-| Variable | Valeur |
-|----------|--------|
-| `KC_DB` | `postgres` |
-| `KC_DB_URL` | `jdbc:postgresql://${POSTGRESQL_ADDON_HOST}:${POSTGRESQL_ADDON_PORT}/${POSTGRESQL_ADDON_DB}` |
-| `KC_DB_USERNAME` | `${POSTGRESQL_ADDON_USER}` |
-| `KC_DB_PASSWORD` | `${POSTGRESQL_ADDON_PASSWORD}` |
-| `KEYCLOAK_ADMIN` | `admin` |
-| `KEYCLOAK_ADMIN_PASSWORD` | `votre_mot_de_passe_securise` |
-| `KC_PROXY` | `edge` |
-| `KC_HTTP_ENABLED` | `true` |
-| `PORT` | `8080` |
-
-> **Important** : Remplacez `votre_mot_de_passe_securise` par un vrai mot de passe fort !
-
-### Étape 2.6 : Déployer Keycloak
-
-```bash
-git init
-git add .
-git commit -m "Initial Keycloak setup"
-git remote add clever <URL_GIT_CLEVER_KEYCLOAK>
-git push clever main:master
-```
-
-### Étape 2.7 : Vérifier le déploiement
-
-1. Attendez que le déploiement soit terminé (peut prendre 2-3 minutes)
-2. Accédez à l'URL de votre Keycloak : `https://app-keycloak-xxxxx.cleverapps.io`
-3. Connectez-vous avec `admin` / `votre_mot_de_passe_securise`
+2. Connectez-vous avec les credentials admin fournis par Clever Cloud
 
 ---
 
@@ -181,7 +129,7 @@ git push clever main:master
 4. Capability config :
    - **Client authentication** : ON
    - **Authorization** : OFF
-   - **Authentication flow** : Cochez "Service accounts roles"
+   - **Authentication flow** : Cochez "Service accounts roles" et "Direct access grants"
    - Cliquez sur **"Next"**
 5. Login settings :
    - **Root URL** : `https://app-gameshelf-xxxxx.cleverapps.io`
@@ -281,8 +229,8 @@ app = Flask(__name__)
 APP_NAME = os.environ.get('APP_NAME', 'GameShelf')
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'development')
 
-# Configuration Keycloak
-KEYCLOAK_URL = os.environ.get('KEYCLOAK_URL', 'https://app-keycloak-xxxxx.cleverapps.io')
+# Configuration Keycloak (variables injectées par l'addon)
+KEYCLOAK_URL = os.environ.get('KEYCLOAK_URL') or os.environ.get('KEYCLOAK_ADDON_URL', '')
 KEYCLOAK_REALM = os.environ.get('KEYCLOAK_REALM', 'gameshelf')
 KEYCLOAK_CLIENT_ID = os.environ.get('KEYCLOAK_CLIENT_ID', 'gameshelf-api')
 KEYCLOAK_CLIENT_SECRET = os.environ.get('KEYCLOAK_CLIENT_SECRET', '')
@@ -665,14 +613,14 @@ if __name__ == '__main__':
 
 ### Étape 4.3 : Ajouter les variables d'environnement
 
-Dans Clever Cloud, ajoutez à l'application GameShelf :
+Dans Clever Cloud, ajoutez ces variables à l'application GameShelf :
 
 | Variable | Valeur |
 |----------|--------|
-| `KEYCLOAK_URL` | `https://app-keycloak-xxxxx.cleverapps.io` |
+| `KEYCLOAK_URL` | URL de votre addon Keycloak (ou utilisez `KEYCLOAK_ADDON_URL` injectée automatiquement) |
 | `KEYCLOAK_REALM` | `gameshelf` |
 | `KEYCLOAK_CLIENT_ID` | `gameshelf-api` |
-| `KEYCLOAK_CLIENT_SECRET` | `votre_client_secret` |
+| `KEYCLOAK_CLIENT_SECRET` | Le secret copié à l'étape 3.3 |
 
 ### Étape 4.4 : Déployer
 
@@ -714,7 +662,7 @@ Vous devriez voir :
 ### Étape 5.3 : Obtenir un token
 
 ```bash
-export KEYCLOAK_URL="https://app-keycloak-xxxxx.cleverapps.io"
+export KEYCLOAK_URL="<URL_DE_VOTRE_ADDON_KEYCLOAK>"
 export REALM="gameshelf"
 
 # Token pour admin-user
@@ -854,7 +802,8 @@ Admin ──────► + Stats, Config, Tout
 
 Pour valider ce TP, vous devez avoir :
 
-- [ ] Déployé Keycloak sur Clever Cloud
+- [ ] Créé l'addon Keycloak sur Clever Cloud
+- [ ] Accédé à la console Keycloak
 - [ ] Créé le realm `gameshelf`
 - [ ] Créé le client `gameshelf-api`
 - [ ] Créé les rôles (admin, staff, customer)
@@ -897,6 +846,6 @@ FLAG{K3ycl04k_0IDC_S3cur3d}
 
 ---
 
-**Durée estimée : 1h30**
+**Durée estimée : 1h**
 
 **Difficulté : Avancé**
