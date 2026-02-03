@@ -1,18 +1,18 @@
-# TP 15 - Gestion des Secrets avec HashiCorp Vault
+# TP 15 - Gestion des Secrets avec HashiCorp Vault sur Clever Cloud
 
 ## Contexte GameShelf
 
 Notre API est sécurisée avec Keycloak, mais nos secrets (credentials DB, clés S3, secrets Keycloak) sont stockés en variables d'environnement. Si quelqu'un accède à la console Clever Cloud ou à notre CI/CD, il voit tous les secrets en clair !
 
-**Objectif de ce TP :** Configurer HashiCorp Vault pour gérer nos secrets de manière sécurisée, avec rotation automatique.
+**Objectif de ce TP :** Déployer HashiCorp Vault sur Clever Cloud et configurer l'API GameShelf pour récupérer ses secrets depuis Vault.
 
 ---
 
 ## Prérequis
 
 - TP 14 complété
-- Docker installé localement
-- docker-compose installé
+- Compte Clever Cloud actif
+- Application GameShelf déployée
 
 ---
 
@@ -56,113 +56,235 @@ Vault est le standard de l'industrie pour la gestion des secrets :
 
 ---
 
-## Partie 2 : Installation de Vault avec Docker
+## Partie 2 : Déploiement de Vault sur Clever Cloud
 
-### Étape 2.1 : Créer le projet
+### Étape 2.1 : Créer l'application Docker
 
-```bash
-mkdir -p ~/vault-demo
-cd ~/vault-demo
-```
+1. Connectez-vous à [console.clever-cloud.com](https://console.clever-cloud.com)
 
-### Étape 2.2 : Créer le fichier docker-compose.yml
+2. Cliquez sur **"Create"** > **"An application"**
 
-```bash
-nano docker-compose.yml
-```
+3. Sélectionnez **"Docker"**
 
-```yaml
-version: '3.8'
+4. Configurez l'application :
+   - **Name** : `gameshelf-vault`
+   - **Region** : Paris
+   - **Size** : S (minimum 1 GB RAM pour Vault)
 
-services:
-  vault:
-    image: hashicorp/vault:1.15
-    container_name: vault
-    ports:
-      - "8200:8200"
-    environment:
-      VAULT_DEV_ROOT_TOKEN_ID: "gameshelf-root-token"
-      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
-    cap_add:
-      - IPC_LOCK
-    volumes:
-      - vault-data:/vault/data
-    command: server -dev
+5. Notez l'URL Git fournie par Clever Cloud
 
-  vault-init:
-    image: hashicorp/vault:1.15
-    container_name: vault-init
-    depends_on:
-      - vault
-    environment:
-      VAULT_ADDR: "http://vault:8200"
-      VAULT_TOKEN: "gameshelf-root-token"
-    volumes:
-      - ./init-vault.sh:/init-vault.sh
-    entrypoint: ["/bin/sh", "-c", "sleep 5 && /init-vault.sh"]
+### Étape 2.2 : Créer une base PostgreSQL pour Vault
 
-volumes:
-  vault-data:
-```
+1. Dans le menu principal, cliquez sur **"Create"** > **"An add-on"**
 
-### Étape 2.3 : Créer le script d'initialisation
+2. Sélectionnez **"PostgreSQL"**
+
+3. Choisissez le plan **"DEV"** (gratuit)
+
+4. **Nom** : `vault-db`
+
+5. **Lier à une application** : Sélectionnez `gameshelf-vault`
+
+6. Cliquez sur **"Create"**
+
+### Étape 2.3 : Créer le projet Vault
 
 ```bash
-nano init-vault.sh
-chmod +x init-vault.sh
+mkdir -p ~/gameshelf-vault
+cd ~/gameshelf-vault
+```
+
+### Étape 2.4 : Créer le Dockerfile
+
+```bash
+nano Dockerfile
+```
+
+```dockerfile
+FROM hashicorp/vault:1.15
+
+# Copier la configuration
+COPY vault-config.hcl /vault/config/vault-config.hcl
+COPY entrypoint.sh /entrypoint.sh
+
+RUN chmod +x /entrypoint.sh
+
+# Vault écoute sur le port 8200
+EXPOSE 8200
+
+ENTRYPOINT ["/entrypoint.sh"]
+```
+
+### Étape 2.5 : Créer la configuration Vault
+
+```bash
+nano vault-config.hcl
+```
+
+```hcl
+ui = true
+
+listener "tcp" {
+  address     = "0.0.0.0:8200"
+  tls_disable = true
+}
+
+storage "postgresql" {
+  connection_url = "postgres://POSTGRESQL_ADDON_USER:POSTGRESQL_ADDON_PASSWORD@POSTGRESQL_ADDON_HOST:POSTGRESQL_ADDON_PORT/POSTGRESQL_ADDON_DB?sslmode=require"
+}
+
+api_addr = "https://VAULT_EXTERNAL_URL"
+
+disable_mlock = true
+```
+
+### Étape 2.6 : Créer le script d'entrée
+
+```bash
+nano entrypoint.sh
 ```
 
 ```bash
 #!/bin/sh
+set -e
 
-echo "=== Initialisation de Vault pour GameShelf ==="
+# Remplacer les variables dans la configuration
+sed -i "s|POSTGRESQL_ADDON_USER|${POSTGRESQL_ADDON_USER}|g" /vault/config/vault-config.hcl
+sed -i "s|POSTGRESQL_ADDON_PASSWORD|${POSTGRESQL_ADDON_PASSWORD}|g" /vault/config/vault-config.hcl
+sed -i "s|POSTGRESQL_ADDON_HOST|${POSTGRESQL_ADDON_HOST}|g" /vault/config/vault-config.hcl
+sed -i "s|POSTGRESQL_ADDON_PORT|${POSTGRESQL_ADDON_PORT}|g" /vault/config/vault-config.hcl
+sed -i "s|POSTGRESQL_ADDON_DB|${POSTGRESQL_ADDON_DB}|g" /vault/config/vault-config.hcl
+sed -i "s|VAULT_EXTERNAL_URL|${VAULT_EXTERNAL_URL}|g" /vault/config/vault-config.hcl
 
-# Attendre que Vault soit prêt
-until vault status > /dev/null 2>&1; do
-    echo "Waiting for Vault..."
-    sleep 2
-done
+echo "=== Vault Configuration ==="
+cat /vault/config/vault-config.hcl
+echo "==========================="
 
-echo "Vault is ready!"
+# Démarrer Vault
+exec vault server -config=/vault/config/vault-config.hcl
+```
 
-# Activer le moteur de secrets KV v2
-echo "Enabling KV secrets engine..."
-vault secrets enable -path=gameshelf kv-v2 || true
+### Étape 2.7 : Configurer les variables d'environnement
 
-# Stocker les secrets de la base de données
-echo "Storing database secrets..."
-vault kv put gameshelf/database \
-    host="postgresql-addon-host.services.clever-cloud.com" \
-    port="5432" \
-    database="gameshelf_db" \
-    username="db_user" \
-    password="super_secret_db_password_123!"
+Dans l'application `gameshelf-vault` sur Clever Cloud, ajoutez :
 
-# Stocker les secrets S3/Cellar
-echo "Storing S3 secrets..."
-vault kv put gameshelf/s3 \
-    endpoint="cellar-c2.services.clever-cloud.com" \
-    access_key="CELLAR_ACCESS_KEY_ID" \
-    secret_key="super_secret_s3_key_456!"
+| Variable | Valeur |
+|----------|--------|
+| `PORT` | `8200` |
+| `VAULT_EXTERNAL_URL` | `https://app-xxxxxxxx.cleverapps.io` (URL de votre app Vault) |
 
-# Stocker les secrets Keycloak
-echo "Storing Keycloak secrets..."
-vault kv put gameshelf/keycloak \
-    url="https://keycloak.gameshelf.com" \
-    realm="gameshelf" \
-    client_id="gameshelf-api" \
-    client_secret="super_secret_keycloak_789!"
+### Étape 2.8 : Déployer Vault
 
-# Stocker les clés de l'application
-echo "Storing application secrets..."
-vault kv put gameshelf/app \
-    secret_key="flask_secret_key_very_secure" \
-    api_key="gameshelf_api_key_abc123" \
-    encryption_key="32_byte_encryption_key_here!!"
+```bash
+git init
+git add .
+git commit -m "Initial Vault setup"
+git remote add clever <URL_GIT_CLEVER_VAULT>
+git push clever main:master
+```
 
-# Créer une politique pour l'application
-echo "Creating app policy..."
-vault policy write gameshelf-app - <<EOF
+### Étape 2.9 : Vérifier le déploiement
+
+1. Attendez que le déploiement soit terminé
+2. Accédez à l'URL de votre Vault : `https://app-vault-xxxxx.cleverapps.io`
+3. Vous devriez voir l'interface d'initialisation de Vault
+
+---
+
+## Partie 3 : Initialisation de Vault
+
+### Étape 3.1 : Initialiser Vault via l'interface web
+
+1. Accédez à l'URL de votre Vault
+
+2. Sur l'écran d'initialisation, configurez :
+   - **Key shares** : 1 (pour la démo ; en production, utilisez 5)
+   - **Key threshold** : 1 (pour la démo ; en production, utilisez 3)
+
+3. Cliquez sur **"Initialize"**
+
+4. **IMPORTANT** : Sauvegardez précieusement :
+   - **Initial root token** : `hvs.xxxxx` (pour l'administration)
+   - **Unseal key** : `xxxxx` (pour débloquer Vault)
+
+### Étape 3.2 : Débloquer (Unseal) Vault
+
+1. Entrez votre **Unseal Key**
+2. Cliquez sur **"Unseal"**
+3. Vault passe en état "unsealed" (débloqué)
+
+### Étape 3.3 : Se connecter
+
+1. Sélectionnez la méthode **"Token"**
+2. Entrez votre **Root Token**
+3. Cliquez sur **"Sign in"**
+
+---
+
+## Partie 4 : Configuration des secrets
+
+### Étape 4.1 : Activer le moteur de secrets KV
+
+1. Dans l'interface Vault, allez dans **"Secrets Engines"**
+2. Cliquez sur **"Enable new engine"**
+3. Sélectionnez **"KV"** (Key-Value)
+4. Configurez :
+   - **Path** : `gameshelf`
+   - **Version** : 2 (avec versioning)
+5. Cliquez sur **"Enable Engine"**
+
+### Étape 4.2 : Créer les secrets via l'interface
+
+1. Cliquez sur **"gameshelf/"**
+2. Cliquez sur **"Create secret"**
+
+**Secret 1 : database**
+- **Path** : `database`
+- **Secret data** :
+  ```
+  host = <votre POSTGRESQL_ADDON_HOST de gameshelf-api>
+  port = <votre POSTGRESQL_ADDON_PORT>
+  database = <votre POSTGRESQL_ADDON_DB>
+  username = <votre POSTGRESQL_ADDON_USER>
+  password = <votre POSTGRESQL_ADDON_PASSWORD>
+  ```
+
+**Secret 2 : s3**
+- **Path** : `s3`
+- **Secret data** :
+  ```
+  endpoint = cellar-c2.services.clever-cloud.com
+  access_key = <votre CELLAR_ADDON_KEY_ID>
+  secret_key = <votre CELLAR_ADDON_KEY_SECRET>
+  ```
+
+**Secret 3 : keycloak**
+- **Path** : `keycloak`
+- **Secret data** :
+  ```
+  url = <URL de votre Keycloak>
+  realm = gameshelf
+  client_id = gameshelf-api
+  client_secret = <votre client secret>
+  ```
+
+**Secret 4 : app**
+- **Path** : `app`
+- **Secret data** :
+  ```
+  secret_key = flask_secret_key_very_secure_123
+  environment = production
+  ```
+
+### Étape 4.3 : Créer une politique d'accès
+
+1. Allez dans **"Policies"**
+2. Cliquez sur **"Create ACL policy"**
+3. Configurez :
+   - **Name** : `gameshelf-app`
+   - **Policy** :
+
+```hcl
 # Lecture seule sur les secrets GameShelf
 path "gameshelf/data/*" {
   capabilities = ["read", "list"]
@@ -172,614 +294,718 @@ path "gameshelf/data/*" {
 path "gameshelf/metadata/*" {
   capabilities = ["read", "list"]
 }
-EOF
-
-# Créer une politique admin
-echo "Creating admin policy..."
-vault policy write gameshelf-admin - <<EOF
-# Accès total sur les secrets GameShelf
-path "gameshelf/*" {
-  capabilities = ["create", "read", "update", "delete", "list"]
-}
-EOF
-
-# Activer l'authentification par token
-echo "Creating app token..."
-vault token create \
-    -policy=gameshelf-app \
-    -ttl=24h \
-    -renewable \
-    -display-name="gameshelf-app" \
-    -id="app-token-gameshelf"
-
-echo ""
-echo "=== Vault initialization complete! ==="
-echo ""
-echo "Root token: gameshelf-root-token"
-echo "App token:  app-token-gameshelf"
-echo ""
-echo "Vault UI: http://localhost:8200"
-echo ""
 ```
 
-### Étape 2.4 : Démarrer Vault
+4. Cliquez sur **"Create policy"**
 
-```bash
-docker-compose up -d
-```
+### Étape 4.4 : Créer un token applicatif
 
-### Étape 2.5 : Vérifier l'installation
-
-```bash
-# Attendre quelques secondes
-sleep 10
-
-# Vérifier le statut
-docker logs vault
-
-# Vérifier l'init
-docker logs vault-init
-```
-
-### Étape 2.6 : Accéder à l'interface web
-
-1. Ouvrez votre navigateur : [http://localhost:8200](http://localhost:8200)
-2. Méthode d'authentification : **Token**
-3. Token : `gameshelf-root-token`
+1. Allez dans **"Access"** > **"Auth Methods"**
+2. Cliquez sur **"token/"** (activé par défaut)
+3. Allez dans l'onglet **"Tokens"**
+4. Cliquez sur **"Create token"**
+5. Configurez :
+   - **Policies** : `gameshelf-app`
+   - **TTL** : `768h` (32 jours)
+   - **Renewable** : Yes
+6. Cliquez sur **"Create token"**
+7. **Sauvegardez le token généré** : `hvs.xxxxx`
 
 ---
 
-## Partie 3 : Explorer Vault via l'interface
+## Partie 5 : Intégration dans l'API GameShelf
 
-### Étape 3.1 : Naviguer dans les secrets
-
-1. Dans le menu, cliquez sur **"Secrets"**
-2. Cliquez sur **"gameshelf/"**
-3. Explorez les différents secrets :
-   - `database`
-   - `s3`
-   - `keycloak`
-   - `app`
-
-### Étape 3.2 : Voir un secret
-
-1. Cliquez sur `database`
-2. Observez les champs (host, port, username, password)
-3. Notez le **versioning** (v1, v2...)
-
-### Étape 3.3 : Voir les politiques
-
-1. Allez dans **"Policies"**
-2. Examinez `gameshelf-app` et `gameshelf-admin`
-3. Comprenez les capabilities : read, list, create, update, delete
-
----
-
-## Partie 4 : Utiliser Vault en ligne de commande
-
-### Étape 4.1 : Installer le client Vault
+### Étape 5.1 : Mettre à jour requirements.txt
 
 ```bash
-# Linux/WSL
-wget https://releases.hashicorp.com/vault/1.15.0/vault_1.15.0_linux_amd64.zip
-unzip vault_1.15.0_linux_amd64.zip
-sudo mv vault /usr/local/bin/
-rm vault_1.15.0_linux_amd64.zip
-
-# macOS
-brew install vault
-```
-
-### Étape 4.2 : Configurer l'accès
-
-```bash
-export VAULT_ADDR="http://localhost:8200"
-export VAULT_TOKEN="gameshelf-root-token"
-```
-
-### Étape 4.3 : Commandes de base
-
-```bash
-# Statut de Vault
-vault status
-
-# Lister les secrets engines
-vault secrets list
-
-# Lister les secrets
-vault kv list gameshelf/
-
-# Lire un secret
-vault kv get gameshelf/database
-
-# Lire un champ spécifique
-vault kv get -field=password gameshelf/database
-
-# Lire en JSON
-vault kv get -format=json gameshelf/database
-```
-
-### Étape 4.4 : Modifier un secret
-
-```bash
-# Mettre à jour le mot de passe de la DB
-vault kv put gameshelf/database \
-    host="postgresql-addon-host.services.clever-cloud.com" \
-    port="5432" \
-    database="gameshelf_db" \
-    username="db_user" \
-    password="new_rotated_password_$(date +%s)!"
-
-# Voir l'historique des versions
-vault kv metadata get gameshelf/database
-```
-
-### Étape 4.5 : Tester avec le token applicatif
-
-```bash
-# Utiliser le token app (droits limités)
-export VAULT_TOKEN="app-token-gameshelf"
-
-# Lecture - devrait fonctionner
-vault kv get gameshelf/database
-
-# Écriture - devrait échouer (403)
-vault kv put gameshelf/database password="hack"
-```
-
----
-
-## Partie 5 : Intégrer Vault dans l'application
-
-### Étape 5.1 : Créer une application de test
-
-```bash
-mkdir -p ~/gameshelf-vault-demo
-cd ~/gameshelf-vault-demo
-```
-
-### Étape 5.2 : Créer le fichier requirements.txt
-
-```bash
+cd ~/gameshelf-clever
 nano requirements.txt
 ```
 
 ```
 flask==3.0.0
+gunicorn==21.2.0
+psycopg2-binary==2.9.9
+boto3==1.34.0
+PyJWT==2.8.0
+cryptography==41.0.0
+requests==2.31.0
 hvac==2.1.0
-python-dotenv==1.0.0
 ```
 
-### Étape 5.3 : Créer l'application
-
-```bash
-nano app.py
-```
+### Étape 5.2 : Mettre à jour app.py
 
 ```python
-from flask import Flask, jsonify
-import hvac
+from flask import Flask, jsonify, request, g
 import os
+import socket
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import boto3
+from botocore.client import Config
 import logging
+import time
+import random
+import jwt
+import requests
+from functools import wraps
+import hvac
 
-logging.basicConfig(level=logging.INFO)
+# Configuration du logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
+)
 logger = logging.getLogger('gameshelf')
 
 app = Flask(__name__)
 
+# Configuration
+APP_NAME = os.environ.get('APP_NAME', 'GameShelf')
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'development')
+
 # Configuration Vault
-VAULT_ADDR = os.environ.get('VAULT_ADDR', 'http://localhost:8200')
-VAULT_TOKEN = os.environ.get('VAULT_TOKEN', 'app-token-gameshelf')
+VAULT_ADDR = os.environ.get('VAULT_ADDR', '')
+VAULT_TOKEN = os.environ.get('VAULT_TOKEN', '')
 VAULT_PATH = 'gameshelf'
+USE_VAULT = bool(VAULT_ADDR and VAULT_TOKEN)
+
+# Cache pour les secrets
+_secrets_cache = {}
+_secrets_cache_time = 0
+SECRETS_CACHE_DURATION = 300  # 5 minutes
 
 # Client Vault
-vault_client = None
+_vault_client = None
 
 
 def get_vault_client():
     """Crée et retourne un client Vault."""
-    global vault_client
-    if vault_client is None:
-        vault_client = hvac.Client(
+    global _vault_client
+    if _vault_client is None and USE_VAULT:
+        _vault_client = hvac.Client(
             url=VAULT_ADDR,
             token=VAULT_TOKEN
         )
-        if not vault_client.is_authenticated():
-            raise Exception("Failed to authenticate with Vault")
-        logger.info("Connected to Vault")
-    return vault_client
+        if _vault_client.is_authenticated():
+            logger.info("Connected to Vault")
+        else:
+            logger.error("Failed to authenticate with Vault")
+            _vault_client = None
+    return _vault_client
 
 
-def get_secret(path, key=None):
-    """Récupère un secret depuis Vault."""
+def get_secret(path):
+    """Récupère un secret depuis Vault avec cache."""
+    global _secrets_cache, _secrets_cache_time
+
+    # Vérifier le cache
+    cache_key = path
+    if cache_key in _secrets_cache and (time.time() - _secrets_cache_time) < SECRETS_CACHE_DURATION:
+        return _secrets_cache[cache_key]
+
+    if not USE_VAULT:
+        return None
+
     try:
         client = get_vault_client()
+        if not client:
+            return None
+
         response = client.secrets.kv.v2.read_secret_version(
             path=path,
             mount_point=VAULT_PATH
         )
         data = response['data']['data']
-        if key:
-            return data.get(key)
+
+        # Mettre en cache
+        _secrets_cache[cache_key] = data
+        _secrets_cache_time = time.time()
+
+        logger.info(f"Secret '{path}' retrieved from Vault")
         return data
     except Exception as e:
-        logger.error(f"Failed to get secret {path}: {e}")
+        logger.error(f"Failed to get secret '{path}': {e}")
         return None
+
+
+def get_config(secret_path, key, env_fallback):
+    """Récupère une config depuis Vault ou fallback sur env var."""
+    if USE_VAULT:
+        secret = get_secret(secret_path)
+        if secret and key in secret:
+            return secret[key]
+    return os.environ.get(env_fallback, '')
+
+
+# Configuration Keycloak (depuis Vault ou env vars)
+def get_keycloak_config():
+    if USE_VAULT:
+        secret = get_secret('keycloak')
+        if secret:
+            return {
+                'url': secret.get('url', ''),
+                'realm': secret.get('realm', 'gameshelf'),
+                'client_id': secret.get('client_id', 'gameshelf-api'),
+                'client_secret': secret.get('client_secret', '')
+            }
+    return {
+        'url': os.environ.get('KEYCLOAK_URL') or os.environ.get('KEYCLOAK_ADDON_URL', ''),
+        'realm': os.environ.get('KEYCLOAK_REALM', 'gameshelf'),
+        'client_id': os.environ.get('KEYCLOAK_CLIENT_ID', 'gameshelf-api'),
+        'client_secret': os.environ.get('KEYCLOAK_CLIENT_SECRET', '')
+    }
+
+
+# Cache pour les clés JWKS
+_jwks_cache = None
+_jwks_cache_time = 0
+JWKS_CACHE_DURATION = 300
+
+
+def get_jwks():
+    """Récupère les clés publiques de Keycloak (avec cache)."""
+    global _jwks_cache, _jwks_cache_time
+
+    if _jwks_cache and (time.time() - _jwks_cache_time) < JWKS_CACHE_DURATION:
+        return _jwks_cache
+
+    try:
+        kc_config = get_keycloak_config()
+        certs_url = f"{kc_config['url']}/realms/{kc_config['realm']}/protocol/openid-connect/certs"
+        response = requests.get(certs_url, timeout=10)
+        response.raise_for_status()
+        _jwks_cache = response.json()
+        _jwks_cache_time = time.time()
+        logger.info("JWKS cache refreshed")
+        return _jwks_cache
+    except Exception as e:
+        logger.error(f"Failed to fetch JWKS: {e}")
+        return _jwks_cache
+
+
+def get_public_key(token):
+    """Extrait la clé publique correspondant au token."""
+    jwks = get_jwks()
+    if not jwks:
+        raise Exception("Unable to fetch JWKS")
+
+    unverified_header = jwt.get_unverified_header(token)
+    kid = unverified_header.get('kid')
+
+    for key in jwks.get('keys', []):
+        if key.get('kid') == kid:
+            return jwt.algorithms.RSAAlgorithm.from_jwk(key)
+
+    raise Exception(f"Public key not found for kid: {kid}")
+
+
+def verify_token(token):
+    """Vérifie et décode un token JWT."""
+    try:
+        kc_config = get_keycloak_config()
+        public_key = get_public_key(token)
+        decoded = jwt.decode(
+            token,
+            public_key,
+            algorithms=['RS256'],
+            audience=kc_config['client_id'],
+            options={"verify_exp": True}
+        )
+        return decoded
+    except jwt.ExpiredSignatureError:
+        logger.warning("Token expired")
+        raise
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Invalid token: {e}")
+        raise
+
+
+def require_auth(f):
+    """Décorateur pour exiger l'authentification."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+
+        if not auth_header:
+            return jsonify({'error': 'Authorization header missing'}), 401
+
+        if not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Invalid authorization format'}), 401
+
+        token = auth_header.split(' ')[1]
+
+        try:
+            decoded = verify_token(token)
+            g.user = decoded
+            g.username = decoded.get('preferred_username', 'unknown')
+            g.roles = decoded.get('realm_access', {}).get('roles', [])
+            logger.info(f"Authenticated user: {g.username}, roles: {g.roles}")
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token expired'}), 401
+        except Exception as e:
+            logger.error(f"Authentication failed: {e}")
+            return jsonify({'error': 'Invalid token'}), 401
+
+        return f(*args, **kwargs)
+    return decorated
+
+
+def require_role(role):
+    """Décorateur pour exiger un rôle spécifique."""
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if not hasattr(g, 'roles'):
+                return jsonify({'error': 'Not authenticated'}), 401
+
+            if role not in g.roles and 'admin' not in g.roles:
+                logger.warning(f"User {g.username} denied access - requires role: {role}")
+                return jsonify({'error': f'Requires role: {role}'}), 403
+
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+
+def get_s3_client():
+    """Crée un client S3 pour Cellar (depuis Vault ou env vars)."""
+    if USE_VAULT:
+        secret = get_secret('s3')
+        if secret:
+            return boto3.client(
+                's3',
+                endpoint_url=f"https://{secret.get('endpoint', '')}",
+                aws_access_key_id=secret.get('access_key'),
+                aws_secret_access_key=secret.get('secret_key'),
+                config=Config(signature_version='s3v4')
+            )
+
+    return boto3.client(
+        's3',
+        endpoint_url=f"https://{os.environ.get('CELLAR_ADDON_HOST', '')}",
+        aws_access_key_id=os.environ.get('CELLAR_ADDON_KEY_ID'),
+        aws_secret_access_key=os.environ.get('CELLAR_ADDON_KEY_SECRET'),
+        config=Config(signature_version='s3v4')
+    )
+
+
+def get_db_connection():
+    """Crée une connexion à PostgreSQL (depuis Vault ou env vars)."""
+    if USE_VAULT:
+        secret = get_secret('database')
+        if secret:
+            return psycopg2.connect(
+                host=secret.get('host'),
+                port=secret.get('port'),
+                database=secret.get('database'),
+                user=secret.get('username'),
+                password=secret.get('password'),
+                cursor_factory=RealDictCursor
+            )
+
+    return psycopg2.connect(
+        host=os.environ.get('POSTGRESQL_ADDON_HOST'),
+        port=os.environ.get('POSTGRESQL_ADDON_PORT'),
+        database=os.environ.get('POSTGRESQL_ADDON_DB'),
+        user=os.environ.get('POSTGRESQL_ADDON_USER'),
+        password=os.environ.get('POSTGRESQL_ADDON_PASSWORD'),
+        cursor_factory=RealDictCursor
+    )
+
+
+# Middleware pour le logging
+@app.before_request
+def before_request():
+    g.start_time = time.time()
+    g.request_id = f"{time.time()}-{random.randint(1000, 9999)}"
+
+@app.after_request
+def after_request(response):
+    if hasattr(g, 'start_time'):
+        elapsed = (time.time() - g.start_time) * 1000
+        user = getattr(g, 'username', 'anonymous')
+        logger.info(f"[{g.request_id}] {user} - {request.method} {request.path} - {response.status_code} in {elapsed:.2f}ms")
+    return response
 
 
 @app.route('/')
 def home():
     return jsonify({
-        "service": "GameShelf API (Vault Demo)",
-        "vault_status": "connected" if get_vault_client().is_authenticated() else "disconnected",
-        "endpoints": ["/", "/health", "/config", "/secrets-demo", "/flag"]
+        "service": f"{APP_NAME} API",
+        "version": "6.0.0",
+        "environment": ENVIRONMENT,
+        "hostname": socket.gethostname(),
+        "auth": "Keycloak OIDC",
+        "secrets": "HashiCorp Vault" if USE_VAULT else "Environment Variables",
+        "endpoints": {
+            "public": ["/", "/health", "/games"],
+            "authenticated": ["/games/<id>", "/profile"],
+            "staff_only": ["/customers", "/rentals"],
+            "admin_only": ["/admin/stats", "/vault-status"]
+        }
     })
 
 
 @app.route('/health')
 def health():
+    db_status = "unknown"
+    keycloak_status = "unknown"
+    vault_status = "unknown"
+
     try:
-        client = get_vault_client()
-        vault_ok = client.is_authenticated()
-    except:
-        vault_ok = False
-
-    return jsonify({
-        "status": "healthy" if vault_ok else "degraded",
-        "vault": "connected" if vault_ok else "error"
-    })
-
-
-@app.route('/config')
-def get_config():
-    """
-    Montre comment l'application récupère sa configuration depuis Vault.
-    Note: En production, ne jamais exposer les secrets via une API !
-    """
-    # Récupérer les secrets de manière sécurisée
-    db_config = get_secret('database')
-    s3_config = get_secret('s3')
-    app_config = get_secret('app')
-
-    # Masquer les valeurs sensibles pour la démo
-    return jsonify({
-        "database": {
-            "host": db_config.get('host') if db_config else None,
-            "port": db_config.get('port') if db_config else None,
-            "database": db_config.get('database') if db_config else None,
-            "username": db_config.get('username') if db_config else None,
-            "password": "***MASKED***"  # Ne jamais exposer !
-        },
-        "s3": {
-            "endpoint": s3_config.get('endpoint') if s3_config else None,
-            "access_key": "***MASKED***",
-            "secret_key": "***MASKED***"
-        },
-        "app": {
-            "secret_key_set": bool(app_config.get('secret_key')) if app_config else False,
-            "api_key_set": bool(app_config.get('api_key')) if app_config else False
-        },
-        "note": "Les vrais secrets sont récupérés depuis Vault mais masqués ici"
-    })
-
-
-@app.route('/secrets-demo')
-def secrets_demo():
-    """
-    Démonstration de la récupération de secrets.
-    Cette route montre le workflow sans exposer les vrais secrets.
-    """
-    steps = []
-
-    # Étape 1: Connexion à Vault
-    try:
-        client = get_vault_client()
-        steps.append({
-            "step": 1,
-            "action": "Connect to Vault",
-            "status": "success",
-            "details": f"Connected to {VAULT_ADDR}"
-        })
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT 1')
+        cur.close()
+        conn.close()
+        db_status = "connected"
     except Exception as e:
-        steps.append({
-            "step": 1,
-            "action": "Connect to Vault",
-            "status": "error",
-            "details": str(e)
-        })
-        return jsonify({"steps": steps}), 500
+        db_status = "error"
+        logger.error(f"DB health check failed: {e}")
 
-    # Étape 2: Récupérer les secrets DB
-    db_secret = get_secret('database')
-    if db_secret:
-        steps.append({
-            "step": 2,
-            "action": "Fetch database secrets",
-            "status": "success",
-            "details": f"Got {len(db_secret)} fields (host, port, database, username, password)"
-        })
+    try:
+        kc_config = get_keycloak_config()
+        response = requests.get(f"{kc_config['url']}/realms/{kc_config['realm']}", timeout=5)
+        keycloak_status = "connected" if response.ok else "error"
+    except:
+        keycloak_status = "unreachable"
+
+    if USE_VAULT:
+        try:
+            client = get_vault_client()
+            vault_status = "connected" if client and client.is_authenticated() else "error"
+        except:
+            vault_status = "error"
     else:
-        steps.append({
-            "step": 2,
-            "action": "Fetch database secrets",
-            "status": "error"
-        })
-
-    # Étape 3: Récupérer les secrets S3
-    s3_secret = get_secret('s3')
-    if s3_secret:
-        steps.append({
-            "step": 3,
-            "action": "Fetch S3 secrets",
-            "status": "success",
-            "details": f"Got {len(s3_secret)} fields (endpoint, access_key, secret_key)"
-        })
-
-    # Étape 4: Récupérer les secrets Keycloak
-    kc_secret = get_secret('keycloak')
-    if kc_secret:
-        steps.append({
-            "step": 4,
-            "action": "Fetch Keycloak secrets",
-            "status": "success",
-            "details": f"Got {len(kc_secret)} fields (url, realm, client_id, client_secret)"
-        })
-
-    # Étape 5: Utilisation
-    steps.append({
-        "step": 5,
-        "action": "Use secrets in application",
-        "status": "success",
-        "details": "Secrets are now available in memory (not in env vars or config files)"
-    })
+        vault_status = "disabled"
 
     return jsonify({
-        "demo": "Secret retrieval workflow",
-        "steps": steps,
-        "security_note": "Secrets are fetched at runtime, never stored in files or env vars"
+        "status": "healthy" if db_status == "connected" else "degraded",
+        "database": db_status,
+        "keycloak": keycloak_status,
+        "vault": vault_status,
+        "hostname": socket.gethostname()
     })
 
 
-@app.route('/rotate-demo')
-def rotate_demo():
-    """Démonstration de la rotation de secrets."""
-    import time
+@app.route('/vault-status')
+@require_auth
+@require_role('admin')
+def vault_status():
+    """Statut détaillé de Vault - admin uniquement."""
+    if not USE_VAULT:
+        return jsonify({
+            "enabled": False,
+            "message": "Vault is not configured. Set VAULT_ADDR and VAULT_TOKEN."
+        })
 
     try:
         client = get_vault_client()
+        if not client:
+            return jsonify({"enabled": True, "status": "error", "message": "Cannot connect to Vault"}), 500
 
-        # Lire la version actuelle
-        response = client.secrets.kv.v2.read_secret_version(
-            path='database',
-            mount_point=VAULT_PATH
-        )
-        current_version = response['data']['metadata']['version']
-
-        # Simuler une rotation (en vrai, ce serait fait par un admin ou un process automatique)
-        # Note: avec le token app, cette opération échouera (droits insuffisants)
+        # Vérifier les secrets disponibles
+        secrets_status = {}
+        for secret_name in ['database', 's3', 'keycloak', 'app']:
+            secret = get_secret(secret_name)
+            secrets_status[secret_name] = {
+                "available": secret is not None,
+                "keys": list(secret.keys()) if secret else []
+            }
 
         return jsonify({
-            "demo": "Secret rotation",
-            "current_version": current_version,
-            "message": "En production, la rotation serait faite par un admin ou automatiquement",
-            "benefits": [
-                "Limiter l'impact d'une fuite",
-                "Conformité réglementaire",
-                "Révoquer les accès compromis"
-            ]
+            "enabled": True,
+            "status": "connected",
+            "vault_addr": VAULT_ADDR,
+            "secrets": secrets_status,
+            "cache_duration": SECRETS_CACHE_DURATION
+        })
+    except Exception as e:
+        return jsonify({"enabled": True, "status": "error", "message": str(e)}), 500
+
+
+@app.route('/games')
+def get_games():
+    """Liste des jeux - accessible à tous."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT g.id, g.name, c.name as category,
+                   g.min_players, g.max_players, g.price
+            FROM games g
+            JOIN categories c ON g.category_id = c.id
+            ORDER BY g.name
+        """)
+        games = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify({"count": len(games), "games": games})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/games/<int:game_id>')
+@require_auth
+def get_game(game_id):
+    """Détails d'un jeu - nécessite authentification."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT g.id, g.name, c.name as category,
+                   g.min_players, g.max_players, g.duration_minutes,
+                   g.price, g.stock
+            FROM games g
+            JOIN categories c ON g.category_id = c.id
+            WHERE g.id = %s
+        """, (game_id,))
+        game = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if game:
+            return jsonify(game)
+        return jsonify({"error": "Game not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/profile')
+@require_auth
+def get_profile():
+    """Profil de l'utilisateur connecté."""
+    return jsonify({
+        "username": g.username,
+        "roles": g.roles,
+        "token_info": {
+            "email": g.user.get('email'),
+            "name": g.user.get('name'),
+            "exp": g.user.get('exp')
+        }
+    })
+
+
+@app.route('/customers')
+@require_auth
+@require_role('staff')
+def get_customers():
+    """Liste des clients - réservé au staff."""
+    logger.info(f"Staff access by {g.username}")
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, email, first_name, last_name, loyalty_points
+            FROM customers
+            ORDER BY last_name, first_name
+        """)
+        customers = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify({"count": len(customers), "customers": customers})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/rentals')
+@require_auth
+@require_role('staff')
+def get_rentals():
+    """Liste des locations - réservé au staff."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT r.id, c.first_name || ' ' || c.last_name as customer,
+                   g.name as game, r.rental_date, r.due_date, r.status
+            FROM rentals r
+            JOIN customers c ON r.customer_id = c.id
+            JOIN games g ON r.game_id = g.id
+            ORDER BY r.rental_date DESC
+        """)
+        rentals = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify({"count": len(rentals), "rentals": rentals})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/admin/stats')
+@require_auth
+@require_role('admin')
+def admin_stats():
+    """Statistiques admin - réservé aux administrateurs."""
+    logger.info(f"Admin access by {g.username}")
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("SELECT COUNT(*) as total FROM games")
+        games_count = cur.fetchone()['total']
+
+        cur.execute("SELECT COUNT(*) as total FROM customers")
+        customers_count = cur.fetchone()['total']
+
+        cur.execute("SELECT COUNT(*) as total FROM rentals WHERE status = 'active'")
+        active_rentals = cur.fetchone()['total']
+
+        cur.execute("SELECT SUM(price) as total FROM games")
+        total_value = cur.fetchone()['total']
+
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "stats": {
+                "games": games_count,
+                "customers": customers_count,
+                "active_rentals": active_rentals,
+                "inventory_value": float(total_value) if total_value else 0
+            },
+            "accessed_by": g.username,
+            "timestamp": time.time()
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 @app.route('/flag')
+@require_auth
+@require_role('admin')
 def get_flag():
-    """Flag de validation."""
-    try:
-        # Vérifier qu'on peut accéder à Vault
-        client = get_vault_client()
-        if not client.is_authenticated():
-            return jsonify({"error": "Not connected to Vault"}), 500
+    """Flag - réservé aux administrateurs."""
+    vault_connected = False
+    if USE_VAULT:
+        try:
+            client = get_vault_client()
+            vault_connected = client and client.is_authenticated()
+        except:
+            pass
 
-        # Récupérer un secret pour prouver que ça fonctionne
-        db_secret = get_secret('database')
-        if not db_secret:
-            return jsonify({"error": "Cannot read secrets"}), 500
-
-        return jsonify({
-            "message": "Bravo ! L'application utilise Vault pour les secrets !",
-            "flag": "FLAG{V4ult_S3cr3ts_M4n4g3d}",
-            "vault_addr": VAULT_ADDR,
-            "secrets_retrieved": ["database", "s3", "keycloak", "app"]
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({
+        "message": "Bravo ! L'API utilise Vault pour les secrets !" if vault_connected else "API fonctionnelle mais Vault non configuré",
+        "flag": "FLAG{V4ult_S3cr3ts_0n_Cl3v3r_Cl0ud}" if vault_connected else "FLAG{K3ycl04k_0IDC_S3cur3d}",
+        "user": g.username,
+        "roles": g.roles,
+        "vault_enabled": USE_VAULT,
+        "vault_connected": vault_connected
+    })
 
 
 if __name__ == '__main__':
-    logger.info("Starting GameShelf Vault Demo")
-    logger.info(f"Vault address: {VAULT_ADDR}")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get('PORT', 8080))
+    logger.info(f"Starting GameShelf API on port {port}")
+    logger.info(f"Vault: {'enabled' if USE_VAULT else 'disabled'}")
+    app.run(host='0.0.0.0', port=port)
 ```
 
-### Étape 5.4 : Exécuter l'application
+### Étape 5.3 : Configurer les variables d'environnement
+
+Dans l'application `gameshelf-api` sur Clever Cloud, ajoutez :
+
+| Variable | Valeur |
+|----------|--------|
+| `VAULT_ADDR` | `https://app-vault-xxxxx.cleverapps.io` |
+| `VAULT_TOKEN` | Le token applicatif créé à l'étape 4.4 |
+
+### Étape 5.4 : Déployer
 
 ```bash
-# Créer un environnement virtuel
-python3 -m venv venv
-source venv/bin/activate
-
-# Installer les dépendances
-pip install -r requirements.txt
-
-# Configurer les variables
-export VAULT_ADDR="http://localhost:8200"
-export VAULT_TOKEN="app-token-gameshelf"
-
-# Lancer l'application
-python app.py
-```
-
-### Étape 5.5 : Tester l'application
-
-```bash
-# Dans un autre terminal
-curl http://localhost:5000/
-curl http://localhost:5000/health
-curl http://localhost:5000/config
-curl http://localhost:5000/secrets-demo
-curl http://localhost:5000/flag
+git add .
+git commit -m "Add Vault integration"
+git push clever main:master
 ```
 
 ---
 
-## Partie 6 : Concepts avancés
+## Partie 6 : Tester l'intégration
 
-### Rotation automatique des secrets
-
-Vault peut générer et faire tourner automatiquement certains secrets :
+### Étape 6.1 : Vérifier le health check
 
 ```bash
-# Exemple : activer le moteur de secrets pour les bases de données
-vault secrets enable database
+export API_URL="https://app-gameshelf-xxxxx.cleverapps.io"
 
-# Configurer la connexion PostgreSQL
-vault write database/config/gameshelf-db \
-    plugin_name=postgresql-database-plugin \
-    connection_url="postgresql://{{username}}:{{password}}@host:5432/gameshelf" \
-    allowed_roles="readonly,readwrite" \
-    username="vault_admin" \
-    password="vault_admin_password"
-
-# Créer un rôle avec credentials dynamiques
-vault write database/roles/readonly \
-    db_name=gameshelf-db \
-    creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}' IN ROLE readonly;" \
-    default_ttl="1h" \
-    max_ttl="24h"
+curl "$API_URL/health"
 ```
 
-### Authentification par AppRole (production)
-
-En production, n'utilisez pas de tokens statiques :
-
-```bash
-# Activer AppRole
-vault auth enable approle
-
-# Créer un rôle pour l'application
-vault write auth/approle/role/gameshelf-api \
-    token_policies="gameshelf-app" \
-    token_ttl=1h \
-    token_max_ttl=24h \
-    secret_id_ttl=10m
-
-# L'application utilise role_id + secret_id pour s'authentifier
-vault read auth/approle/role/gameshelf-api/role-id
-vault write -f auth/approle/role/gameshelf-api/secret-id
+Vous devriez voir :
+```json
+{
+  "status": "healthy",
+  "database": "connected",
+  "keycloak": "connected",
+  "vault": "connected"
+}
 ```
 
-### Transit Engine (chiffrement)
-
-Vault peut aussi chiffrer des données sans exposer les clés :
+### Étape 6.2 : Tester le statut Vault (admin)
 
 ```bash
-# Activer le moteur de transit
-vault secrets enable transit
+# Obtenir un token admin
+export KEYCLOAK_URL="<URL_KEYCLOAK>"
+TOKEN=$(curl -s -X POST \
+  "$KEYCLOAK_URL/realms/gameshelf/protocol/openid-connect/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "client_id=gameshelf-api" \
+  -d "client_secret=VOTRE_CLIENT_SECRET" \
+  -d "username=admin-user" \
+  -d "password=admin123" \
+  -d "grant_type=password" | jq -r '.access_token')
 
-# Créer une clé de chiffrement
-vault write -f transit/keys/gameshelf-data
+# Vérifier le statut Vault
+curl -H "Authorization: Bearer $TOKEN" "$API_URL/vault-status"
+```
 
-# Chiffrer des données
-vault write transit/encrypt/gameshelf-data \
-    plaintext=$(base64 <<< "données sensibles")
+### Étape 6.3 : Récupérer le flag
 
-# Déchiffrer
-vault write transit/decrypt/gameshelf-data \
-    ciphertext="vault:v1:..."
+```bash
+curl -H "Authorization: Bearer $TOKEN" "$API_URL/flag"
 ```
 
 ---
 
 ## Partie 7 : Bonnes pratiques
 
-### Principe du moindre privilège
+### Gestion des tokens Vault
 
-```yaml
-# Mauvais : accès total
-path "secret/*" {
-  capabilities = ["create", "read", "update", "delete", "list"]
-}
+| Pratique | Description |
+|----------|-------------|
+| **TTL court** | Tokens avec durée de vie limitée (24h-7j) |
+| **Renouvellement** | Configurer le renouvellement automatique |
+| **Révocation** | Révoquer immédiatement les tokens compromis |
+| **Audit** | Activer les logs d'audit |
 
-# Bon : accès restreint et spécifique
-path "gameshelf/data/database" {
-  capabilities = ["read"]
-}
-```
+### Rotation des secrets
 
-### Ne jamais hardcoder les tokens
+1. Mettre à jour le secret dans Vault (nouvelle version)
+2. L'application récupère automatiquement la nouvelle version (après expiration du cache)
+3. Aucun redéploiement nécessaire !
 
-```python
-# Mauvais
-VAULT_TOKEN = "root-token-12345"
-
-# Bon
-VAULT_TOKEN = os.environ.get('VAULT_TOKEN')
-
-# Encore mieux : AppRole
-# L'application s'authentifie dynamiquement
-```
-
-### Audit trail
-
-```bash
-# Activer l'audit
-vault audit enable file file_path=/vault/logs/audit.log
-
-# Chaque opération est loggée avec qui, quoi, quand
-```
-
-### Disaster recovery
-
-- Sauvegarder régulièrement les snapshots Vault
-- Tester les procédures de restauration
-- Avoir plusieurs unseal keys chez différentes personnes
-
----
-
-## Partie 8 : Architecture production
-
-### Architecture recommandée
+### Architecture production
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     ARCHITECTURE VAULT                      │
+│                   ARCHITECTURE VAULT                        │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│    ┌─────────┐     ┌─────────────┐     ┌─────────────┐    │
-│    │   App   │────►│    Vault    │────►│   Backend   │    │
-│    │         │     │   Server    │     │  (Consul)   │    │
-│    └─────────┘     └─────────────┘     └─────────────┘    │
-│         │                 │                               │
-│         │           ┌─────┴─────┐                         │
-│         │           │   Auth    │                         │
-│         │           │  Backend  │                         │
-│         │           └───────────┘                         │
-│         │                                                 │
-│    AppRole / JWT / Kubernetes Auth                        │
-│                                                           │
+│   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐  │
+│   │  GameShelf  │────►│    Vault    │────►│  PostgreSQL │  │
+│   │     API     │     │   Server    │     │   Backend   │  │
+│   └─────────────┘     └─────────────┘     └─────────────┘  │
+│         │                   │                              │
+│         │              Secrets:                            │
+│         │              - database                          │
+│         │              - s3                                │
+│         │              - keycloak                          │
+│         │              - app                               │
+│         │                                                  │
+│         └── Token Auth (hvs.xxx)                           │
+│                                                            │
 └─────────────────────────────────────────────────────────────┘
 ```
-
-### Comparaison avec d'autres solutions
-
-| Solution | Type | Auto-hébergé | Intégrations |
-|----------|------|--------------|--------------|
-| **HashiCorp Vault** | Complet | Oui | Très nombreuses |
-| **AWS Secrets Manager** | Cloud | Non | AWS |
-| **Azure Key Vault** | Cloud | Non | Azure |
-| **GCP Secret Manager** | Cloud | Non | GCP |
-| **Doppler** | SaaS | Non | Multi-cloud |
 
 ---
 
@@ -787,39 +1013,23 @@ vault audit enable file file_path=/vault/logs/audit.log
 
 Pour valider ce TP, vous devez avoir :
 
-- [ ] Installé Vault avec Docker
-- [ ] Créé les secrets GameShelf
-- [ ] Créé les politiques d'accès
-- [ ] Utilisé l'interface web Vault
-- [ ] Utilisé le CLI Vault
-- [ ] Testé les différents tokens (root vs app)
-- [ ] Créé l'application Python avec hvac
-- [ ] Récupéré les secrets depuis l'application
-- [ ] Compris les concepts de rotation et audit
-- [ ] Récupéré le flag
+- [ ] Déployé Vault sur Clever Cloud (Docker)
+- [ ] Créé la base PostgreSQL pour Vault
+- [ ] Initialisé et débloqué Vault
+- [ ] Créé les secrets (database, s3, keycloak, app)
+- [ ] Créé la politique d'accès
+- [ ] Créé le token applicatif
+- [ ] Modifié l'API pour utiliser Vault
+- [ ] Testé le health check avec Vault connecté
+- [ ] Testé le endpoint /vault-status
+- [ ] Récupéré le flag avec Vault activé
 
 ---
 
 ## Flag de validation
 
 ```
-FLAG{V4ult_S3cr3ts_M4n4g3d}
-```
-
----
-
-## Nettoyage
-
-```bash
-# Arrêter Vault
-cd ~/vault-demo
-docker-compose down -v
-
-# Arrêter l'application Python
-# Ctrl+C dans le terminal
-
-# Désactiver l'environnement virtuel
-deactivate
+FLAG{V4ult_S3cr3ts_0n_Cl3v3r_Cl0ud}
 ```
 
 ---
@@ -867,14 +1077,6 @@ Félicitations ! Vous avez terminé le cours Cloud Computing.
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
-
-### Prochaines étapes suggérées
-
-1. **Certification** : AWS, GCP, Azure, ou Kubernetes (CKA)
-2. **GitOps** : ArgoCD, Flux
-3. **Service Mesh** : Istio, Linkerd
-4. **Serverless** : AWS Lambda, Cloud Functions
-5. **SRE** : Practices, Chaos Engineering
 
 ---
 
