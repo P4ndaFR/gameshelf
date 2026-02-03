@@ -149,7 +149,7 @@ git init
 git add .
 git commit -m "Initial Keycloak setup"
 git remote add clever <URL_GIT_CLEVER_KEYCLOAK>
-git push clever main
+git push clever main:master
 ```
 
 ### Étape 2.7 : Vérifier le déploiement
@@ -679,7 +679,7 @@ Dans Clever Cloud, ajoutez à l'application GameShelf :
 ```bash
 git add .
 git commit -m "Add Keycloak authentication"
-git push clever main
+git push clever main:master
 ```
 
 ---

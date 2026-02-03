@@ -261,10 +261,10 @@ Ou copiez-la depuis la console.
 
 ```bash
 git remote add clever <URL_GIT_CLEVER>
-git push clever main
+git push clever main:master
 ```
 
-> Si votre branche s'appelle `master` : `git push clever master`
+> Cette commande pousse votre branche locale `main` vers la branche `master` de Clever Cloud.
 
 ### Étape 4.8 : Suivre le déploiement
 

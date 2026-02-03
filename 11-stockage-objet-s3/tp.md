@@ -41,16 +41,16 @@ Notre API fonctionne avec PostgreSQL, mais nous devons stocker les images des bo
 
 ### Étape 2.1 : Ajouter un addon Cellar
 
-1. Dans la console Clever Cloud, allez dans votre application
+1. Dans le menu principal de Clever Cloud, cliquez sur **"Create"** > **"An add-on"** (même chemin que pour créer une application)
 
-2. **Service dependencies** > **Link an add-on** > **New add-on**
+2. Sélectionnez **"Cellar S3 storage"**
 
-3. Sélectionnez **"Cellar S3 storage"**
-
-4. Choisissez le plan :
+3. Choisissez le plan :
    - **S** : 100 Go (suffisant pour le TP)
 
-5. **Nom** : `gameshelf-storage`
+4. **Nom** : `gameshelf-storage`
+
+5. **Lier à une application** : Sélectionnez `gameshelf-api` pour lier l'addon pendant la création
 
 6. Cliquez sur **"Create"**
 
@@ -363,7 +363,7 @@ boto3==1.34.0
 ```bash
 git add .
 git commit -m "Add S3 storage integration"
-git push clever main
+git push clever main:master
 ```
 
 ---

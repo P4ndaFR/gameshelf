@@ -25,26 +25,26 @@ Notre API tourne sur Clever Cloud, mais les données sont en mémoire et dispara
 
 ### Étape 1.2 : Ajouter un addon PostgreSQL
 
-1. Cliquez sur **"Service dependencies"** ou **"Add-ons"**
+1. Dans le menu principal de Clever Cloud, cliquez sur **"Create"** > **"An add-on"** (même chemin que pour créer une application)
 
-2. Cliquez sur **"Link an add-on"** puis **"New add-on"**
+2. Sélectionnez **"PostgreSQL"**
 
-3. Sélectionnez **"PostgreSQL"**
-
-4. Choisissez le plan **"DEV"** (gratuit) :
+3. Choisissez le plan **"DEV"** (gratuit) :
    - 256 MB RAM
    - 10 connexions max
    - Parfait pour le développement
 
-5. **Nom** : `gameshelf-db`
+4. **Nom** : `gameshelf-db`
 
-6. **Région** : Paris (même région que l'app)
+5. **Région** : Paris (même région que l'app)
+
+6. **Lier à une application** : Sélectionnez `gameshelf-api` pour lier l'addon pendant la création
 
 7. Cliquez sur **"Create"**
 
-### Étape 1.3 : Lier l'addon à l'application
+### Étape 1.3 : Vérifier la liaison
 
-1. L'addon est automatiquement lié à votre application
+1. L'addon est automatiquement lié à votre application (grâce à l'étape précédente)
 
 2. Des variables d'environnement sont injectées automatiquement :
    - `POSTGRESQL_ADDON_HOST`
@@ -414,7 +414,7 @@ psycopg2-binary==2.9.9
 ```bash
 git add .
 git commit -m "Add PostgreSQL connection"
-git push clever main
+git push clever main:master
 ```
 
 ---

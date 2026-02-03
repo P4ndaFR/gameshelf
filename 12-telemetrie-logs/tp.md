@@ -437,7 +437,7 @@ if __name__ == '__main__':
 ```bash
 git add .
 git commit -m "Add structured logging"
-git push clever main
+git push clever main:master
 ```
 
 ---
