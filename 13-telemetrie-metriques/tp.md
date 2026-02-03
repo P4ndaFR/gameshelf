@@ -69,7 +69,13 @@ Les logs nous ont aidés à trouver des bugs, mais les clients se plaignent que 
 
 2. Sélectionnez votre application `gameshelf-api`
 
-3. Cliquez sur **"Metrics"** dans le menu de gauche
+3. Cliquez sur **"Vue d'ensemble"** (Overview)
+
+4. Dans la section **"Métrique serveur"**, cliquez sur le **logo Grafana**
+
+5. Cliquez sur **"Activer Grafana"**
+
+6. Une fois la page rechargée, cliquez sur **"Ouvrir dans Grafana"**
 
 ### Étape 2.2 : Comprendre le dashboard
 
@@ -495,7 +501,7 @@ git push clever main:master
 
 ### Étape 4.1 : État initial
 
-1. Allez dans **Metrics** sur la console Clever Cloud
+1. Ouvrez **Grafana** (voir étape 2.1)
 2. Notez les valeurs actuelles :
    - Mémoire utilisée : ______ MB
    - CPU : ______ %
@@ -547,7 +553,7 @@ done
 
 Pendant le script, observez :
 
-1. **Les métriques Clever Cloud** : La courbe de mémoire monte-t-elle ?
+1. **Grafana** : La courbe de mémoire monte-t-elle ?
 2. **Le endpoint `/cache-stats`** : Le nombre d'entrées augmente-t-il ?
 3. **Le endpoint `/health`** : Les stats du cache sont visibles
 
@@ -701,7 +707,7 @@ Pour les ressources, surveillez :
 
 Pour valider ce TP, vous devez avoir :
 
-- [ ] Accédé aux métriques Clever Cloud
+- [ ] Accédé à Grafana via Clever Cloud
 - [ ] Observé les métriques de base (CPU, mémoire)
 - [ ] Déployé l'application avec le cache buggé
 - [ ] Généré du trafic pour provoquer la fuite mémoire
