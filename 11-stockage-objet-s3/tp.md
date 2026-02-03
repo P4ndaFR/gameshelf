@@ -65,43 +65,47 @@ Les variables injectées :
 
 ## Partie 3 : Configuration du client S3
 
-### Étape 3.1 : Installer AWS CLI
+### Étape 3.1 : Installer s3cmd
 
-L'AWS CLI fonctionne avec tout stockage compatible S3.
+`s3cmd` est un client en ligne de commande compatible avec les services S3.
 
 ```bash
 # Linux/WSL
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip
-sudo ./aws/install
-rm -rf aws awscliv2.zip
+sudo apt install s3cmd
 
 # macOS
-brew install awscli
+brew install s3cmd
 ```
 
-### Étape 3.2 : Configurer le profil Cellar
+### Étape 3.2 : Configurer s3cmd pour Cellar
 
 ```bash
-aws configure --profile cellar
+s3cmd --configure
 ```
 
-Entrez :
-- **Access Key ID** : Votre `CELLAR_ADDON_KEY_ID`
-- **Secret Access Key** : Votre `CELLAR_ADDON_KEY_SECRET`
-- **Region** : `us-east-1` (ou laisser vide)
-- **Output format** : `json`
+Répondez aux questions :
 
-### Étape 3.3 : Créer un alias pour Cellar
+| Question | Valeur |
+|----------|--------|
+| **Access Key** | Votre `CELLAR_ADDON_KEY_ID` |
+| **Secret Key** | Votre `CELLAR_ADDON_KEY_SECRET` |
+| **Default Region** | `US` (appuyez sur Entrée) |
+| **S3 Endpoint** | `cellar-c2.services.clever-cloud.com` |
+| **DNS-style bucket+hostname** | `%(bucket)s.cellar-c2.services.clever-cloud.com` |
+| **Encryption password** | (laisser vide, appuyez sur Entrée) |
+| **Path to GPG program** | (appuyez sur Entrée pour garder la valeur par défaut) |
+| **Use HTTPS protocol** | `Yes` |
+| **HTTP Proxy server name** | (laisser vide, appuyez sur Entrée) |
+
+À la fin, confirmez avec `Y` pour sauvegarder la configuration.
+
+### Étape 3.3 : Vérifier la configuration
 
 ```bash
-# Ajouter dans ~/.bashrc ou ~/.zshrc
-alias s3cellar='aws --profile cellar --endpoint-url https://cellar-c2.services.clever-cloud.com s3'
+s3cmd ls
 ```
 
-```bash
-source ~/.bashrc
-```
+Cette commande doit s'exécuter sans erreur (elle retourne une liste vide si vous n'avez pas encore de bucket).
 
 ---
 
@@ -113,29 +117,28 @@ source ~/.bashrc
 
 ```bash
 # Générer un nom unique avec un suffixe aléatoire
-s3cellar mb s3://gameshelf-images-$(openssl rand -hex 4)
+export BUCKET_NAME="gameshelf-images-$(openssl rand -hex 4)"
+echo "Bucket name: $BUCKET_NAME"
+
+# Créer le bucket
+s3cmd mb s3://$BUCKET_NAME
 ```
 
-Notez le nom du bucket créé et exportez-le dans une variable :
-
-```bash
-# Remplacez par le nom de votre bucket
-export BUCKET_NAME="gameshelf-images-a1b2c3d4"
-```
+> Notez bien le nom du bucket créé, vous en aurez besoin pour la suite.
 
 ### Étape 4.2 : Lister les buckets
 
 ```bash
-s3cellar ls
+s3cmd ls
 ```
 
-### Étape 4.3 : Préparer des images de test
+### Étape 4.3 : Préparer des fichiers de test
 
 ```bash
-mkdir -p ~/gameshelf-images
-cd ~/gameshelf-images
+mkdir -p ~/gameshelf-files
+cd ~/gameshelf-files
 
-# Créer des images placeholder (ou téléchargez de vraies images)
+# Créer des fichiers placeholder (ou téléchargez de vraies images)
 echo "Image placeholder pour Catan" > catan.txt
 echo "Image placeholder pour Pandemic" > pandemic.txt
 echo "Image placeholder pour Codenames" > codenames.txt
@@ -145,66 +148,61 @@ echo "Image placeholder pour Codenames" > codenames.txt
 
 ```bash
 # Upload un fichier
-s3cellar cp catan.txt s3://$BUCKET_NAME/games/catan.txt
+s3cmd put catan.txt s3://$BUCKET_NAME/games/catan.txt
 
 # Upload plusieurs fichiers
-s3cellar cp . s3://$BUCKET_NAME/games/ --recursive
+s3cmd put *.txt s3://$BUCKET_NAME/games/
 
-# Upload avec type MIME
-s3cellar cp image.jpg s3://$BUCKET_NAME/games/catan.jpg --content-type image/jpeg
+# Upload avec type MIME (pour une vraie image)
+# s3cmd put image.jpg s3://$BUCKET_NAME/games/catan.jpg --mime-type=image/jpeg
 ```
 
 ### Étape 4.5 : Lister les objets
 
 ```bash
-s3cellar ls s3://$BUCKET_NAME/
-s3cellar ls s3://$BUCKET_NAME/games/
+s3cmd ls s3://$BUCKET_NAME/
+s3cmd ls s3://$BUCKET_NAME/games/
 ```
 
 ### Étape 4.6 : Télécharger des fichiers
 
 ```bash
-s3cellar cp s3://$BUCKET_NAME/games/catan.txt ./downloaded-catan.txt
+s3cmd get s3://$BUCKET_NAME/games/catan.txt ./downloaded-catan.txt
 ```
 
 ### Étape 4.7 : Supprimer des fichiers
 
 ```bash
-s3cellar rm s3://$BUCKET_NAME/games/catan.txt
+s3cmd del s3://$BUCKET_NAME/games/catan.txt
 ```
 
 ---
 
 ## Partie 5 : Accès public aux images
 
-### Étape 5.1 : Rendre un bucket public
+### Étape 5.1 : Rendre des fichiers publics
 
-Créez une policy pour accès public en lecture (remplacez `$BUCKET_NAME` par votre nom de bucket) :
+Avec s3cmd, vous pouvez rendre des fichiers publics de deux façons :
 
-```bash
-cat > bucket-policy.json << EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "PublicReadGetObject",
-      "Effect": "Allow",
-      "Principal": "*",
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::$BUCKET_NAME/*"
-    }
-  ]
-}
-EOF
-```
-
-Appliquez la policy :
+**Option A : Rendre un fichier public après upload**
 
 ```bash
-s3cellar put-bucket-policy --bucket $BUCKET_NAME --policy file://bucket-policy.json
+s3cmd setacl s3://$BUCKET_NAME/games/catan.txt --acl-public
 ```
 
-### Étape 5.2 : Accéder aux images publiquement
+**Option B : Uploader directement en public**
+
+```bash
+s3cmd put catan.txt s3://$BUCKET_NAME/games/catan.txt --acl-public
+```
+
+**Option C : Rendre tout le contenu d'un dossier public**
+
+```bash
+s3cmd setacl s3://$BUCKET_NAME/games/ --acl-public --recursive
+```
+
+### Étape 5.2 : Accéder aux fichiers publiquement
 
 L'URL publique suit ce format :
 ```
@@ -213,7 +211,12 @@ https://<bucket>.cellar-c2.services.clever-cloud.com/<key>
 
 Exemple (avec votre nom de bucket) :
 ```
-https://$BUCKET_NAME.cellar-c2.services.clever-cloud.com/games/catan.jpg
+https://$BUCKET_NAME.cellar-c2.services.clever-cloud.com/games/catan.txt
+```
+
+Testez l'accès public :
+```bash
+curl https://$BUCKET_NAME.cellar-c2.services.clever-cloud.com/games/catan.txt
 ```
 
 ---
